@@ -1,9 +1,16 @@
 package mr
 
+import "encoding/json"
+
 // KeyValue Map functions return a slice of KeyValue.
 type KeyValue struct {
 	Key   string
 	Value string
+}
+
+func (kv *KeyValue) Bytes() []byte {
+	bytes, _ := json.Marshal(kv)
+	return bytes
 }
 
 const (
@@ -42,5 +49,9 @@ const (
 type State uint8
 
 type AssignMapTasks struct {
+	Tasks []*Task
+}
+
+type AssignReduceTasks struct {
 	Tasks []*Task
 }

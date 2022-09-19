@@ -7,7 +7,6 @@ package mr
 //
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/rpc"
@@ -70,8 +69,7 @@ const (
 )
 
 type ReportReq struct {
-	ReportType ReportType
-	JsonData   string
+	List []*WorkerInfo
 }
 
 type ReportResp struct{}
@@ -88,16 +86,22 @@ const CoordinatorReport = "Coordinator.Report"
 
 // Report 接受worker上报服务元信息, 任务状态/输出元信息
 func (c *Coordinator) Report(req *ReportReq, resp *ReportResp) (err error) {
-	log.Printf("coordinator recv req:%+v \n", req)
-	switch req.ReportType {
-	case RegisterWorker:
-		return c.updateWorkers(req.JsonData)
-	case SubmitResults:
-		var submit SubmitTasks
-		_ = json.Unmarshal([]byte(req.JsonData), &submit)
-		c.Events <- &submit
-	}
-	return
+	log.Printf("coordinator recv report. req:%+v \n", req)
+	return c.updateWorkers(req.List)
+}
+
+type TaskDoneReq struct {
+	Tasks []*Task
+}
+
+type TaskDoneResp struct {
+}
+
+const CoordinatorTaskDone = "Coordinator.TaskDone"
+
+func (c *Coordinator) TaskDone(req *TaskDoneReq, resp *TaskDoneResp) (err error) {
+	log.Printf("coordinator recv task done. req:%+v \n", req)
+	return c.taskDone(req.Tasks)
 }
 
 type InvokeReq struct {

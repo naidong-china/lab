@@ -1,13 +1,14 @@
 package mr
 
 import (
-	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path"
 )
 import "net/rpc"
 
@@ -61,11 +62,7 @@ func ihash(key string) int {
 
 func (w *Worker) register() {
 
-	bytes, _ := json.Marshal(w.WorkerInfo)
-	req := &ReportReq{
-		ReportType: RegisterWorker,
-		JsonData:   string(bytes),
-	}
+	req := &ReportReq{List: []*WorkerInfo{&w.WorkerInfo}}
 	resp := &ReportResp{}
 	w.CoordinatorClient.Call(CoordinatorReport, req, resp)
 }
@@ -77,19 +74,27 @@ func (w *Worker) invoke(req *InvokeReq) (err error) {
 		case MapOpName:
 			w.invokeMapTask(task)
 		case ReduceOpName:
-			go w.invokeReduceTask(task)
+			w.invokeReduceTask(task)
 		}
 	}
 	return
 }
 
 func (w *Worker) invokeMapTask(task *Task) {
-	log.Printf("invoke map task. id:%d \n", task.TaskId)
+	log.Printf("invoke map task. id:%s \n", task.TaskId)
 	var NReduce = task.NReduce
 
-	intermediate := make(map[int][]KeyValue)
+	intermediate := make(map[int]*os.File)
 	for i := 1; i <= NReduce; i++ {
-		intermediate[i] = make([]KeyValue, 1000)
+		oname := fmt.Sprintf("mr-worker-%d-reduce-in-%d", w.WorkerId, i)
+		output := path.Join(w.Addr, oname)
+		f, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		intermediate[i] = f
+		task.Output = append(task.Output, output)
 	}
 
 	for _, filename := range task.Inputs {
@@ -107,12 +112,21 @@ func (w *Worker) invokeMapTask(task *Task) {
 		log.Printf("MapOp output: %d \n", len(kva))
 		for _, kv := range kva {
 			idx := ihash(kv.Key) % NReduce
-			_, ok := intermediate[idx]
-			if ok {
-				intermediate[idx] = append(intermediate[idx], kv)
+			f, ok := intermediate[idx]
+			if !ok {
+				log.Printf("not found output file. key:%s, idx:%d \n", kv.Key, idx)
+				continue
+			}
+			if _, err := f.Write(kv.Bytes()); err != nil {
+				log.Printf("write output file. key:%s, err:%s", kv.Key, err.Error())
 			}
 		}
 	}
+
+	task.State = Completed
+	req := &TaskDoneReq{Tasks: []*Task{task}}
+	resp := &TaskDoneResp{}
+	w.CoordinatorClient.Call(CoordinatorTaskDone, req, resp)
 }
 
 func (w *Worker) invokeReduceTask(task *Task) {

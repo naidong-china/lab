@@ -1,9 +1,9 @@
 package mr
 
 import (
-	"encoding/json"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 )
 import "net"
@@ -54,88 +54,120 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	mapTasks := make([]*Task, 0)
 	for i, file := range files {
 		mapTasks = append(mapTasks, &Task{
-			TaskId:  "map" + strconv.Itoa(i),
+			TaskId:  MapOpName + strconv.Itoa(i),
 			FnName:  MapOpName,
 			State:   Ready,
 			NReduce: nReduce,
 			Inputs:  []string{file},
 		})
 	}
-	c.Events <- &AssignMapTasks{Tasks: mapTasks}
+	go func() { c.assignMapTask(&AssignMapTasks{Tasks: mapTasks}) }()
 
 	c.server()
-	go func() { c.eventLoop() }()
 	return &c
 }
 
-func (c *Coordinator) eventLoop() {
+func (c *Coordinator) updateWorkers(list []*WorkerInfo) (err error) {
 
-	for {
-		event := <-c.Events
-		switch ev := event.(type) {
-		case *AssignMapTasks:
-			go func() { c.assignMapTask(ev) }()
-		default:
-			log.Printf("unsupported event: %v \n", event)
-		}
+	for _, info := range list {
+		info.Client = NewRpcClient(info.Network, info.Addr)
+		c.Workers[info.WorkerId] = info
 	}
-}
-
-func (c *Coordinator) updateWorkers(data string) (err error) {
-
-	var info WorkerInfo
-	if err = json.Unmarshal([]byte(data), &info); err != nil {
-		log.Printf("update worker infos. err:%v \n", err)
-		return
-	}
-	info.Client = NewRpcClient(info.Network, info.Addr)
-	c.Workers[info.WorkerId] = &info
 	return
 }
 
-func (c *Coordinator) assignMapTask(submitTasks *AssignMapTasks) {
+func (c *Coordinator) taskDone(tasks []*Task) (err error) {
 
-	// todo 协调者寻找合适的Worker分配任务
-	assignMapTask := make([]*Task, 0)
-	for _, task := range submitTasks.Tasks {
-		if task.FnName != MapOpName {
+	var checkMapTaskAllDone bool
+	for _, t := range tasks {
+		if task, ok := c.Tasks[t.TaskId]; ok {
+			task.State = t.State
+			task.Output = append(task.Output, t.Output...)
+		}
+		if t.FnName == MapOpName {
+			checkMapTaskAllDone = true
+		}
+	}
+	// 触发MapTask isAllDone检查
+	if checkMapTaskAllDone {
+		c.assignReduceTask(&AssignReduceTasks{})
+	}
+	return
+}
+
+func (c *Coordinator) applyWorker() (worker *WorkerInfo) {
+
+	for {
+		if len(c.Workers) == 0 {
+			log.Println("not found running worker")
+			time.Sleep(5 * time.Second)
 			continue
 		}
-		switch task.State {
-		case Ready:
-			for {
-				if len(c.Workers) == 0 {
-					log.Println("not found running worker")
-					time.Sleep(5 * time.Second)
-					continue
-				}
-				for wid := range c.Workers {
-					task.WorkerId = wid
-					break
-				}
-				break
+		// todo 加锁
+		for _, w := range c.Workers {
+			if w.State == Running {
+				return w
 			}
-			c.Tasks[task.TaskId] = task
-			assignMapTask = append(assignMapTask, task)
-		case Completed:
-			if t, ok := c.Tasks[task.TaskId]; ok {
-				t.State = Completed
-				t.Output = task.Output
-			}
-			// todo 判断是否所有MapTask已完成
+		}
+	}
+}
+
+func (c *Coordinator) assignMapTask(assignMapTasks *AssignMapTasks) {
+
+	// 协调者寻找合适的Worker分配任务
+	for _, task := range assignMapTasks.Tasks {
+		if task.State != Ready {
+			continue
+		}
+		worker := c.applyWorker()
+		task.WorkerId = worker.WorkerId
+		c.Tasks[task.TaskId] = task
+		worker.Client.Call(WorkerInvoke, &InvokeReq{Tasks: []*Task{task}}, &InvokeResp{})
+		task.State = InProgress
+		log.Printf("assign map task to worker:%d \n", task.WorkerId)
+	}
+}
+
+func (c *Coordinator) assignReduceTask(assignReduceTask *AssignReduceTasks) {
+
+	outputs := make(map[string][]string)
+	for _, t := range c.Tasks {
+		if t.FnName == MapOpName && t.State != Completed {
+			return
+		}
+		for _, output := range t.Output {
+			split := strings.Split(output, "-")
+			reduceIdx := split[len(split)-1]
+			outputs[reduceIdx] = append(outputs[reduceIdx], output)
 		}
 	}
 
-	for _, task := range assignMapTask {
-		if task.FnName != MapOpName {
-			continue
+	// 构建M个MapTask, 推送给协调者
+	reduceTasks := make(map[string]*Task)
+	for i, output := range outputs {
+
+		task, ok := reduceTasks[i]
+		if !ok {
+			reduceTasks[i] = &Task{
+				TaskId: ReduceOpName + i,
+				FnName: ReduceOpName,
+				State:  Ready,
+			}
+			task = reduceTasks[i]
 		}
+		task.Output = append(task.Output, output...)
+		worker := c.applyWorker()
+		task.WorkerId = worker.WorkerId
+		c.Tasks[task.TaskId] = task
+	}
+
+	for _, task := range reduceTasks {
 		worker, ok := c.Workers[task.WorkerId]
 		if !ok {
 			continue
 		}
-		log.Printf("assign map task to worker:%d \n", task.WorkerId)
 		worker.Client.Call(WorkerInvoke, &InvokeReq{Tasks: []*Task{task}}, &InvokeResp{})
 		task.State = InProgress
+		log.Printf("assign reduce task to worker:%d \n", task.WorkerId)
 	}
 }
