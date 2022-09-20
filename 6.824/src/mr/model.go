@@ -8,10 +8,21 @@ type KeyValue struct {
 	Value string
 }
 
-func (kv *KeyValue) Bytes() []byte {
+func (kv *KeyValue) Marshal() []byte {
 	bytes, _ := json.Marshal(kv)
 	return bytes
 }
+
+func (kv *KeyValue) Unmarshal(bytes []byte) {
+	_ = json.Unmarshal(bytes, &kv)
+}
+
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 const (
 	MapOpName    = "Map"

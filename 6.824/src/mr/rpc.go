@@ -61,13 +61,6 @@ func (r *RpcClient) Call(rpcname string, args interface{}, reply interface{}) bo
 	return err == nil
 }
 
-type ReportType uint8
-
-const (
-	RegisterWorker ReportType = 1
-	SubmitResults  ReportType = 2
-)
-
 type ReportReq struct {
 	List []*WorkerInfo
 }
@@ -75,11 +68,14 @@ type ReportReq struct {
 type ReportResp struct{}
 
 type WorkerInfo struct {
-	WorkerId int64      `json:"worker_id"`
-	Network  string     `json:"network"`
-	Addr     string     `json:"addr"`
-	State    State      `json:"state"`
-	Client   *RpcClient `json:"-"`
+	WorkerId int64
+	Network  string
+	Addr     string
+	State    State
+}
+
+func (w *WorkerInfo) Client() *RpcClient {
+	return NewRpcClient(w.Network, w.Addr)
 }
 
 const CoordinatorReport = "Coordinator.Report"

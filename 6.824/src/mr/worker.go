@@ -3,12 +3,14 @@ package mr
 import (
 	"fmt"
 	"hash/fnv"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path"
+	"sort"
 )
 import "net/rpc"
 
@@ -85,16 +87,17 @@ func (w *Worker) invokeMapTask(task *Task) {
 	var NReduce = task.NReduce
 
 	intermediate := make(map[int]*os.File)
-	for i := 1; i <= NReduce; i++ {
+	for i := 0; i < NReduce; i++ {
 		oname := fmt.Sprintf("mr-worker-%d-reduce-in-%d", w.WorkerId, i)
-		output := path.Join(w.Addr, oname)
+		output := path.Join("/var/tmp", oname)
 		f, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 		intermediate[i] = f
-		task.Output = append(task.Output, output)
+		task.Output = append(task.Output, oname)
+		defer f.Close()
 	}
 
 	for _, filename := range task.Inputs {
@@ -106,7 +109,7 @@ func (w *Worker) invokeMapTask(task *Task) {
 		if err != nil {
 			log.Fatalf("cannot read %v", filename)
 		}
-		file.Close()
+		_ = file.Close()
 
 		kva := w.MapOp(filename, string(content))
 		log.Printf("MapOp output: %d \n", len(kva))
@@ -117,7 +120,7 @@ func (w *Worker) invokeMapTask(task *Task) {
 				log.Printf("not found output file. key:%s, idx:%d \n", kv.Key, idx)
 				continue
 			}
-			if _, err := f.Write(kv.Bytes()); err != nil {
+			if _, err := f.Write(append(kv.Marshal(), '\n')); err != nil {
 				log.Printf("write output file. key:%s, err:%s", kv.Key, err.Error())
 			}
 		}
@@ -131,4 +134,46 @@ func (w *Worker) invokeMapTask(task *Task) {
 
 func (w *Worker) invokeReduceTask(task *Task) {
 
+	intermediate := []KeyValue{}
+	for _, input := range task.Inputs {
+		file, err := os.OpenFile(path.Join("/var/tmp", input), os.O_WRONLY, os.ModePerm)
+		if err != nil {
+			log.Printf("open input file. input:%s, err:%s \n", input, err.Error())
+			continue
+		}
+
+		for {
+			var bytes []byte
+			_, e := file.Read(bytes)
+			if e == io.EOF {
+				break
+			}
+
+			kv := &KeyValue{}
+			kv.Unmarshal(bytes)
+			intermediate = append(intermediate)
+		}
+	}
+
+	sort.Sort(ByKey(intermediate))
+
+	ofile, _ := os.Create(path.Join(w.Addr, "mr-out-0"))
+	defer ofile.Close()
+
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := w.ReduceOp(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+		i = j
+	}
 }

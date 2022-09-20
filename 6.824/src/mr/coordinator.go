@@ -70,7 +70,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 func (c *Coordinator) updateWorkers(list []*WorkerInfo) (err error) {
 
 	for _, info := range list {
-		info.Client = NewRpcClient(info.Network, info.Addr)
 		c.Workers[info.WorkerId] = info
 	}
 	return
@@ -122,7 +121,7 @@ func (c *Coordinator) assignMapTask(assignMapTasks *AssignMapTasks) {
 		worker := c.applyWorker()
 		task.WorkerId = worker.WorkerId
 		c.Tasks[task.TaskId] = task
-		worker.Client.Call(WorkerInvoke, &InvokeReq{Tasks: []*Task{task}}, &InvokeResp{})
+		worker.Client().Call(WorkerInvoke, &InvokeReq{Tasks: []*Task{task}}, &InvokeResp{})
 		task.State = InProgress
 		log.Printf("assign map task to worker:%d \n", task.WorkerId)
 	}
@@ -155,7 +154,7 @@ func (c *Coordinator) assignReduceTask(assignReduceTask *AssignReduceTasks) {
 			}
 			task = reduceTasks[i]
 		}
-		task.Output = append(task.Output, output...)
+		task.Inputs = append(task.Inputs, output...)
 		worker := c.applyWorker()
 		task.WorkerId = worker.WorkerId
 		c.Tasks[task.TaskId] = task
@@ -166,7 +165,7 @@ func (c *Coordinator) assignReduceTask(assignReduceTask *AssignReduceTasks) {
 		if !ok {
 			continue
 		}
-		worker.Client.Call(WorkerInvoke, &InvokeReq{Tasks: []*Task{task}}, &InvokeResp{})
+		worker.Client().Call(WorkerInvoke, &InvokeReq{Tasks: []*Task{task}}, &InvokeResp{})
 		task.State = InProgress
 		log.Printf("assign reduce task to worker:%d \n", task.WorkerId)
 	}
