@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"bufio"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strings"
 )
 import "net/rpc"
 
@@ -74,9 +76,9 @@ func (w *Worker) invoke(req *InvokeReq) (err error) {
 	for _, task := range req.Tasks {
 		switch task.FnName {
 		case MapOpName:
-			w.invokeMapTask(task)
+			go w.invokeMapTask(task)
 		case ReduceOpName:
-			w.invokeReduceTask(task)
+			go w.invokeReduceTask(task)
 		}
 	}
 	return
@@ -133,31 +135,36 @@ func (w *Worker) invokeMapTask(task *Task) {
 }
 
 func (w *Worker) invokeReduceTask(task *Task) {
+	log.Printf("invoke reduce task. id:%s \n", task.TaskId)
 
-	intermediate := []KeyValue{}
+	intermediate := make([]*KeyValue, 0)
 	for _, input := range task.Inputs {
-		file, err := os.OpenFile(path.Join("/var/tmp", input), os.O_WRONLY, os.ModePerm)
+		file, err := os.OpenFile(path.Join("/var/tmp", input), os.O_RDONLY, os.ModePerm)
 		if err != nil {
 			log.Printf("open input file. input:%s, err:%s \n", input, err.Error())
 			continue
 		}
 
+		buf := bufio.NewReader(file)
 		for {
-			var bytes []byte
-			_, e := file.Read(bytes)
+			line, e := buf.ReadString('\n')
 			if e == io.EOF {
 				break
 			}
+			if e != nil {
+				log.Printf("read input file. err:%s", e.Error())
+				return
+			}
 
 			kv := &KeyValue{}
-			kv.Unmarshal(bytes)
-			intermediate = append(intermediate)
+			kv.Unmarshal([]byte(strings.TrimSpace(line)))
+			intermediate = append(intermediate, kv)
 		}
 	}
 
 	sort.Sort(ByKey(intermediate))
 
-	ofile, _ := os.Create(path.Join(w.Addr, "mr-out-0"))
+	ofile, _ := os.Create(path.Join("/var/tmp", "mr-out-0"))
 	defer ofile.Close()
 
 	i := 0
@@ -166,7 +173,7 @@ func (w *Worker) invokeReduceTask(task *Task) {
 		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
 			j++
 		}
-		values := []string{}
+		values := make([]string, 0)
 		for k := i; k < j; k++ {
 			values = append(values, intermediate[k].Value)
 		}

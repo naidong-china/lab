@@ -4,6 +4,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 import "net"
@@ -13,10 +14,11 @@ import "net/http"
 
 // Coordinator 协调者
 type Coordinator struct {
-	Workers map[int64]*WorkerInfo
-	Tasks   map[string]*Task
-	Events  chan interface{}
-	State   State
+	Workers   map[int64]*WorkerInfo
+	Tasks     map[string]*Task
+	Events    chan interface{}
+	State     State
+	mapTaskWG sync.WaitGroup
 }
 
 // start a thread that listens for RPCs from worker.go
@@ -60,8 +62,15 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			NReduce: nReduce,
 			Inputs:  []string{file},
 		})
+		c.mapTaskWG.Add(1)
 	}
-	go func() { c.assignMapTask(&AssignMapTasks{Tasks: mapTasks}) }()
+	go func() {
+		c.assignMapTask(&AssignMapTasks{Tasks: mapTasks})
+	}()
+	go func() {
+		c.mapTaskWG.Wait()
+		c.assignReduceTask(&AssignReduceTasks{})
+	}()
 
 	c.server()
 	return &c
@@ -77,19 +86,16 @@ func (c *Coordinator) updateWorkers(list []*WorkerInfo) (err error) {
 
 func (c *Coordinator) taskDone(tasks []*Task) (err error) {
 
-	var checkMapTaskAllDone bool
 	for _, t := range tasks {
-		if task, ok := c.Tasks[t.TaskId]; ok {
-			task.State = t.State
-			task.Output = append(task.Output, t.Output...)
+		task, ok := c.Tasks[t.TaskId]
+		if !ok {
+			continue
 		}
-		if t.FnName == MapOpName {
-			checkMapTaskAllDone = true
+		task.State = t.State
+		task.Output = append(task.Output, t.Output...)
+		if task.FnName == MapOpName {
+			c.mapTaskWG.Done()
 		}
-	}
-	// 触发MapTask isAllDone检查
-	if checkMapTaskAllDone {
-		c.assignReduceTask(&AssignReduceTasks{})
 	}
 	return
 }
@@ -122,7 +128,7 @@ func (c *Coordinator) assignMapTask(assignMapTasks *AssignMapTasks) {
 		task.WorkerId = worker.WorkerId
 		c.Tasks[task.TaskId] = task
 		worker.Client().Call(WorkerInvoke, &InvokeReq{Tasks: []*Task{task}}, &InvokeResp{})
-		task.State = InProgress
+		//task.State = InProgress
 		log.Printf("assign map task to worker:%d \n", task.WorkerId)
 	}
 }
@@ -137,7 +143,15 @@ func (c *Coordinator) assignReduceTask(assignReduceTask *AssignReduceTasks) {
 		for _, output := range t.Output {
 			split := strings.Split(output, "-")
 			reduceIdx := split[len(split)-1]
-			outputs[reduceIdx] = append(outputs[reduceIdx], output)
+
+			outs, ok := outputs[reduceIdx]
+			if !ok {
+				outs = make([]string, 0)
+				outputs[reduceIdx] = outs
+			}
+			if IndexOf(outs, output) == -1 {
+				outputs[reduceIdx] = append(outputs[reduceIdx], output)
+			}
 		}
 	}
 
