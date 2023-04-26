@@ -39,15 +39,16 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if rf.hasVoted {
+		//DPrintf("get vote fail from%d. term%d server%d ", rf.me, args.Term, args.Server)
 		return
 	}
 	rf.hasVoted = true
 	reply.Ok = true
-	DPrintf("get vote ok. term:%d server:%d ", args.Term, args.Server)
+	DPrintf("get vote ok from%d. term%d server%d ", rf.me, args.Term, args.Server)
 }
 
 func (rf *Raft) RequestHeartBeat(args *CommonArgs, reply *CommonReply) {
-	reply = &CommonReply{OK: true}
+	reply.OK = true
 	return
 }
 
@@ -56,8 +57,6 @@ func (rf *Raft) RequestNewLeader(args *RequestNewLeader, reply *CommonReply) {
 	defer rf.mu.Unlock()
 	rf.leader = args.Leader
 	rf.term = args.Term
-	rf.hasVoted = false
-	rf.votes = 0
 	rf.ChangeRole(Follower)
 	reply.OK = true
 }
@@ -91,21 +90,21 @@ func (rf *Raft) RequestNewLeader(args *RequestNewLeader, reply *CommonReply) {
 // the struct itself.
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	if server <= 0 || server >= len(rf.peers) {
+	if server < 0 || server >= len(rf.peers) {
 		return false
 	}
 	return rf.peers[server].Call("Raft.RequestVote", args, reply)
 }
 
 func (rf *Raft) sendRequestHeartBeat(server int, args *CommonArgs, reply *CommonReply) bool {
-	if server <= 0 || server >= len(rf.peers) {
+	if server < 0 || server >= len(rf.peers) {
 		return false
 	}
 	return rf.peers[server].Call("Raft.RequestHeartBeat", args, reply)
 }
 
 func (rf *Raft) sendRequestNewLeader(server int, args *RequestNewLeader, reply *CommonReply) bool {
-	if server <= 0 || server >= len(rf.peers) {
+	if server < 0 || server >= len(rf.peers) {
 		return false
 	}
 	return rf.peers[server].Call("Raft.RequestNewLeader", args, reply)

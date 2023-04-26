@@ -9,6 +9,10 @@ import (
 // Debugging
 const Debug = true
 
+func init() {
+	log.SetFlags(log.Ldate | log.Lmicroseconds)
+}
+
 func DPrintf(format string, a ...interface{}) {
 	if Debug {
 		format += "\n"

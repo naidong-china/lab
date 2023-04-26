@@ -33,7 +33,7 @@ const (
 
 	NoLeader = -1
 
-	HeartBeatInterval = 500 * time.Millisecond
+	HeartBeatInterval = 100 * time.Millisecond
 )
 
 // ApplyMsg
@@ -97,8 +97,6 @@ func (rf *Raft) ChangeRole(toRole Role) {
 	case rf.role == Candidate && toRole == Leader:
 		rf.leader = rf.me
 		rf.role = Leader
-		rf.hasVoted = false
-		rf.votes = 0
 		DPrintf("leader is server:%d in term:%d", rf.me, rf.term)
 	case rf.role == Follower && toRole == Candidate:
 		rf.leader = NoLeader
@@ -222,15 +220,17 @@ func (rf *Raft) ticker() {
 		// Your code here to check if a leader election should
 		// be started and to randomize sleeping time using
 		// time.Sleep().
+		time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 300))
+
 		// todo ask heartbeat or send heartbeat
 		resp := &CommonReply{}
 		ok := rf.sendRequestHeartBeat(rf.leader, &CommonArgs{}, resp)
 		if ok && resp.OK {
 			rf.lastHeartBeat = time.Now().UnixNano() / 1e6
-			time.Sleep(HeartBeatInterval + RandomizeSleepTime(100, 200))
+			time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 300))
 			continue
 		}
-		DPrintf("can not get heartbeat. leader:%v, server:%v", rf.leader, rf.me)
+		DPrintf("can not get heartbeat. leader%v, server%v", rf.leader, rf.me)
 
 		rf.ChangeRole(Candidate)
 
@@ -250,13 +250,13 @@ func (rf *Raft) ticker() {
 					rf.mu.Unlock()
 					rf.votes += 1
 				}
-				DPrintf("request vote. me:%d term:%d server:%d res:%v", rf.me, rf.term, server, rsp.Ok)
+				DPrintf("request vote. me%d term%d server%d res:%v", rf.me, rf.term, server, rsp.Ok)
 			}(i)
 		}
 		wg.Wait()
 
 		majority := Majority(len(rf.peers))
-		DPrintf("vote result. server:%d vote:%d majority:%d", rf.me, rf.votes, majority)
+		DPrintf("vote result. server%d vote:%d majority:%d", rf.me, rf.votes, majority)
 		if rf.votes >= majority {
 			rf.ChangeRole(Leader)
 
@@ -272,7 +272,7 @@ func (rf *Raft) ticker() {
 				}(i)
 			}
 		}
-		time.Sleep(HeartBeatInterval)
+		time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 300))
 	}
 }
 
