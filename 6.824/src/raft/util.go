@@ -30,7 +30,7 @@ func Majority(n int) int {
 }
 
 func RandomizeSleepTime(min, max int) time.Duration {
-	rand.Seed(time.Now().Unix())
+	rand.Seed(time.Now().UnixNano())
 	res := 0
 	for res < max {
 		res = rand.Intn(max)

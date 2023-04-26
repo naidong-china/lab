@@ -1,5 +1,10 @@
 package raft
 
+import (
+	"context"
+	"time"
+)
+
 type CommonArgs struct {
 }
 
@@ -44,7 +49,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 	rf.hasVoted = true
 	reply.Ok = true
-	DPrintf("get vote ok from%d. term%d server%d ", rf.me, args.Term, args.Server)
+	//DPrintf("get vote ok from%d. term%d server%d ", rf.me, args.Term, args.Server)
 }
 
 func (rf *Raft) RequestHeartBeat(args *CommonArgs, reply *CommonReply) {
@@ -53,11 +58,10 @@ func (rf *Raft) RequestHeartBeat(args *CommonArgs, reply *CommonReply) {
 }
 
 func (rf *Raft) RequestNewLeader(args *RequestNewLeader, reply *CommonReply) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.ChangeRole(Follower)
 	rf.leader = args.Leader
 	rf.term = args.Term
-	rf.ChangeRole(Follower)
+	rf.electionEnd = true
 	reply.OK = true
 }
 
@@ -96,11 +100,26 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return rf.peers[server].Call("Raft.RequestVote", args, reply)
 }
 
-func (rf *Raft) sendRequestHeartBeat(server int, args *CommonArgs, reply *CommonReply) bool {
+func (rf *Raft) sendRequestHeartBeat(server int, args *CommonArgs, reply *CommonReply, timeout time.Duration) (res bool) {
 	if server < 0 || server >= len(rf.peers) {
 		return false
 	}
-	return rf.peers[server].Call("Raft.RequestHeartBeat", args, reply)
+	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
+	defer cancel()
+
+	ch := make(chan struct{})
+	go func() {
+		res = rf.peers[server].Call("Raft.RequestHeartBeat", args, reply)
+		ch <- struct{}{}
+	}()
+
+	select {
+	case <-ch:
+		return res
+	case <-ctx.Done():
+		DPrintf("heart beat timeout")
+		return false
+	}
 }
 
 func (rf *Raft) sendRequestNewLeader(server int, args *RequestNewLeader, reply *CommonReply) bool {

@@ -33,7 +33,7 @@ const (
 
 	NoLeader = -1
 
-	HeartBeatInterval = 100 * time.Millisecond
+	HeartBeatInterval = 50 * time.Millisecond
 )
 
 // ApplyMsg
@@ -71,6 +71,7 @@ type Raft struct {
 	me            int   // this peer's index into peers[]
 	leader        int   // current leader
 	term          int   // current term
+	electionEnd   bool
 	role          Role  // 如果转变为候选者, 那么leader及term都要重置, 只有候选者能进行投票
 	lastHeartBeat int64 // last heart beat time
 
@@ -102,8 +103,15 @@ func (rf *Raft) ChangeRole(toRole Role) {
 		rf.leader = NoLeader
 		rf.term += 1
 		rf.role = Candidate
-	case rf.role == Candidate && toRole == Follower:
+		rf.hasVoted = true
+		rf.votes = 1
+	case rf.role == Candidate && toRole == Candidate:
+		rf.hasVoted = false
+		rf.votes = 0
+	case toRole == Follower:
 		rf.role = Follower
+		rf.hasVoted = false
+		rf.votes = 0
 	default:
 		DPrintf("unsupported %v to role:%v", rf.role, toRole)
 	}
@@ -220,18 +228,31 @@ func (rf *Raft) ticker() {
 		// Your code here to check if a leader election should
 		// be started and to randomize sleeping time using
 		// time.Sleep().
-		time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 300))
+		if rf.role == Leader {
+			time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 50))
+			continue
+		}
 
 		// todo ask heartbeat or send heartbeat
 		resp := &CommonReply{}
-		ok := rf.sendRequestHeartBeat(rf.leader, &CommonArgs{}, resp)
+		ok := rf.sendRequestHeartBeat(rf.leader, &CommonArgs{}, resp, 5*time.Millisecond)
 		if ok && resp.OK {
+			//DPrintf("heart beat ok. leader%v, server%v", rf.leader, rf.me)
 			rf.lastHeartBeat = time.Now().UnixNano() / 1e6
-			time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 300))
+			time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 50))
+			continue
+		} else {
+			rf.electionEnd = false
+		}
+		ms := RandomizeSleepTime(10, 500)
+		DPrintf("heartbeat loss, start election after %v. leader%v, server%v", ms, rf.leader, rf.me)
+		time.Sleep(ms)
+
+		if rf.electionEnd {
 			continue
 		}
-		DPrintf("can not get heartbeat. leader%v, server%v", rf.leader, rf.me)
 
+		// 心跳超时后, 转变为候选者, 开启新一轮投票
 		rf.ChangeRole(Candidate)
 
 		var wg sync.WaitGroup
@@ -268,11 +289,11 @@ func (rf *Raft) ticker() {
 					req := &RequestNewLeader{Leader: rf.me, Term: rf.term}
 					rsp := &CommonReply{}
 					ok := rf.sendRequestNewLeader(server, req, rsp)
-					DPrintf("notify new leader to all. res:%v", ok)
+					DPrintf("notify new leader to server%d res:%v", server, ok)
 				}(i)
 			}
 		}
-		time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 300))
+		time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 50))
 	}
 }
 
