@@ -33,7 +33,7 @@ const (
 
 	NoLeader = -1
 
-	HeartBeatInterval = 50 * time.Millisecond
+	HeartBeatInterval = 10 * time.Millisecond
 )
 
 // ApplyMsg
@@ -89,6 +89,18 @@ type Raft struct {
 func (rf *Raft) GetState() (int, bool) {
 	// todo 考虑数据竞争
 	return rf.term, rf.leader == rf.me
+}
+
+func (rf *Raft) SetLastHeartBeat() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.lastHeartBeat = (time.Now().UnixNano() / 1e6) + 3000
+}
+
+func (rf *Raft) GetLastHeartBeat() int64 {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	return rf.lastHeartBeat
 }
 
 func (rf *Raft) ChangeRole(toRole Role) {
@@ -228,27 +240,41 @@ func (rf *Raft) ticker() {
 		// Your code here to check if a leader election should
 		// be started and to randomize sleeping time using
 		// time.Sleep().
+		var ms int
 		if rf.role == Leader {
-			RandomizeSleep(rf.me)
+			// todo ask heartbeat or send heartbeat
+			for i := 0; i < len(rf.peers); i++ {
+				if i == rf.me {
+					continue
+				}
+				go func(server int) {
+					req := &RequestHeartBeat{rf.me, rf.term}
+					resp := &CommonReply{}
+					ok := rf.sendRequestHeartBeat(rf.leader, req, resp)
+					if ok && resp.OK {
+						//DPrintf("heart beat ok. leader%v, server%v", rf.leader, server)
+					}
+				}(i)
+			}
+			RandomizeSleep(rf.me, HeartBeatInterval)
 			continue
+		} else {
+			ms = RandomizeSleep(rf.me, 0)
 		}
 
-		// todo ask heartbeat or send heartbeat
-		resp := &CommonReply{}
-		ok := rf.sendRequestHeartBeat(rf.leader, &CommonArgs{}, resp)
-		if ok && resp.OK {
-			//DPrintf("heart beat ok. leader%v, server%v", rf.leader, rf.me)
-			rf.lastHeartBeat = time.Now().UnixNano() / 1e6
-			RandomizeSleep(rf.me)
+		//ms := RandomizeSleep(rf.me, 0)
+		now := time.Now().UnixNano() / 1e6
+		timeoutPoint := rf.GetLastHeartBeat()
+		if now <= timeoutPoint {
 			continue
 		} else {
 			rf.electionEnd = false
 		}
-		ms := RandomizeSleep(rf.me)
+
 		if rf.electionEnd {
 			continue
 		}
-		DPrintf("heartbeat loss, start election after %vms. leader%v, server%v", ms, rf.leader, rf.me)
+		DPrintf("heartbeat loss, start election after %vms. leader%v, server%v, time:%v, now:%v", ms, rf.leader, rf.me, timeoutPoint, now)
 
 		// 心跳超时后, 转变为候选者, 开启新一轮投票
 		rf.ChangeRole(Candidate)
@@ -292,7 +318,7 @@ func (rf *Raft) ticker() {
 			}
 		}
 
-		RandomizeSleep(rf.me)
+		//RandomizeSleep(rf.me, 0)
 	}
 }
 

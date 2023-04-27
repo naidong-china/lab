@@ -33,6 +33,11 @@ type RequestNewLeader struct {
 	Term   int
 }
 
+type RequestHeartBeat struct {
+	Leader int
+	Term   int
+}
+
 // RequestVote
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
@@ -52,7 +57,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	//DPrintf("get vote ok from%d. term%d server%d ", rf.me, args.Term, args.Server)
 }
 
-func (rf *Raft) RequestHeartBeat(args *CommonArgs, reply *CommonReply) {
+func (rf *Raft) RequestHeartBeat(args *RequestHeartBeat, reply *CommonReply) {
+	if rf.term > args.Term && rf.leader != args.Leader {
+		rf.ChangeRole(Follower)
+		rf.leader = args.Leader
+		rf.term = args.Term
+	}
+	rf.SetLastHeartBeat()
 	reply.OK = true
 	return
 }
@@ -62,6 +73,7 @@ func (rf *Raft) RequestNewLeader(args *RequestNewLeader, reply *CommonReply) {
 	rf.leader = args.Leader
 	rf.term = args.Term
 	rf.electionEnd = true
+	rf.SetLastHeartBeat()
 	reply.OK = true
 }
 
@@ -114,7 +126,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	}
 }
 
-func (rf *Raft) sendRequestHeartBeat(server int, args *CommonArgs, reply *CommonReply) (res bool) {
+func (rf *Raft) sendRequestHeartBeat(server int, args *RequestHeartBeat, reply *CommonReply) (res bool) {
 	if server < 0 || server >= len(rf.peers) {
 		return false
 	}
