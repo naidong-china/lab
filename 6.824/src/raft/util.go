@@ -29,14 +29,15 @@ func Majority(n int) int {
 	}
 }
 
-func RandomizeSleepTime(min, max int) time.Duration {
-	rand.Seed(time.Now().UnixNano())
-	res := 0
+func RandomizeSleep(server int) (res int) {
+	rand.Seed(time.Now().UnixNano() + int64(server))
+	min, max := 30, 150
 	for res < max {
 		res = rand.Intn(max)
 		if min < res {
-			return time.Duration(res) * time.Millisecond
+			break
 		}
 	}
-	return time.Duration(0)
+	time.Sleep(HeartBeatInterval + time.Duration(res)*time.Millisecond)
+	return int(HeartBeatInterval.Milliseconds()) + res
 }

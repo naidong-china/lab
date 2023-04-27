@@ -93,18 +93,32 @@ func (rf *Raft) RequestNewLeader(args *RequestNewLeader, reply *CommonReply) {
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 //
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
+func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) (res bool) {
 	if server < 0 || server >= len(rf.peers) {
 		return false
 	}
-	return rf.peers[server].Call("Raft.RequestVote", args, reply)
+	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Millisecond)
+	defer cancel()
+
+	ch := make(chan struct{})
+	go func() {
+		res = rf.peers[server].Call("Raft.RequestVote", args, reply)
+		ch <- struct{}{}
+	}()
+
+	select {
+	case <-ch:
+		return res
+	case <-ctx.Done():
+		return res
+	}
 }
 
-func (rf *Raft) sendRequestHeartBeat(server int, args *CommonArgs, reply *CommonReply, timeout time.Duration) (res bool) {
+func (rf *Raft) sendRequestHeartBeat(server int, args *CommonArgs, reply *CommonReply) (res bool) {
 	if server < 0 || server >= len(rf.peers) {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.TODO(), timeout)
+	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Millisecond)
 	defer cancel()
 
 	ch := make(chan struct{})
@@ -117,14 +131,30 @@ func (rf *Raft) sendRequestHeartBeat(server int, args *CommonArgs, reply *Common
 	case <-ch:
 		return res
 	case <-ctx.Done():
-		DPrintf("heart beat timeout")
-		return false
+		//DPrintf("heart beat timeout")
+		return res
 	}
 }
 
-func (rf *Raft) sendRequestNewLeader(server int, args *RequestNewLeader, reply *CommonReply) bool {
+func (rf *Raft) sendRequestNewLeader(server int, args *RequestNewLeader, reply *CommonReply) (res bool) {
 	if server < 0 || server >= len(rf.peers) {
 		return false
 	}
-	return rf.peers[server].Call("Raft.RequestNewLeader", args, reply)
+
+	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Millisecond)
+	defer cancel()
+
+	ch := make(chan struct{})
+	go func() {
+		res = rf.peers[server].Call("Raft.RequestNewLeader", args, reply)
+		ch <- struct{}{}
+	}()
+
+	select {
+	case <-ch:
+		return res
+	case <-ctx.Done():
+		//DPrintf("heart beat timeout")
+		return res
+	}
 }

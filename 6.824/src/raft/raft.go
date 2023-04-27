@@ -229,28 +229,26 @@ func (rf *Raft) ticker() {
 		// be started and to randomize sleeping time using
 		// time.Sleep().
 		if rf.role == Leader {
-			time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 50))
+			RandomizeSleep(rf.me)
 			continue
 		}
 
 		// todo ask heartbeat or send heartbeat
 		resp := &CommonReply{}
-		ok := rf.sendRequestHeartBeat(rf.leader, &CommonArgs{}, resp, 5*time.Millisecond)
+		ok := rf.sendRequestHeartBeat(rf.leader, &CommonArgs{}, resp)
 		if ok && resp.OK {
 			//DPrintf("heart beat ok. leader%v, server%v", rf.leader, rf.me)
 			rf.lastHeartBeat = time.Now().UnixNano() / 1e6
-			time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 50))
+			RandomizeSleep(rf.me)
 			continue
 		} else {
 			rf.electionEnd = false
 		}
-		ms := RandomizeSleepTime(10, 500)
-		DPrintf("heartbeat loss, start election after %v. leader%v, server%v", ms, rf.leader, rf.me)
-		time.Sleep(ms)
-
+		ms := RandomizeSleep(rf.me)
 		if rf.electionEnd {
 			continue
 		}
+		DPrintf("heartbeat loss, start election after %vms. leader%v, server%v", ms, rf.leader, rf.me)
 
 		// 心跳超时后, 转变为候选者, 开启新一轮投票
 		rf.ChangeRole(Candidate)
@@ -293,7 +291,8 @@ func (rf *Raft) ticker() {
 				}(i)
 			}
 		}
-		time.Sleep(HeartBeatInterval + RandomizeSleepTime(10, 50))
+
+		RandomizeSleep(rf.me)
 	}
 }
 
