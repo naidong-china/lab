@@ -46,15 +46,19 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	/*if rf.role == Candidate {
 		return
 	}*/
+	DPrintf("get vote ok from%d. term%d %d server%d ", rf.me, rf.term, args.Term, args.Server)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if rf.hasVoted {
 		//DPrintf("get vote fail from%d. term%d server%d ", rf.me, args.Term, args.Server)
 		return
 	}
+	if args.Term < rf.term {
+		return
+	}
 	rf.hasVoted = true
 	reply.Ok = true
-	//DPrintf("get vote ok from%d. term%d server%d ", rf.me, args.Term, args.Server)
+
 }
 
 func (rf *Raft) RequestHeartBeat(args *RequestHeartBeat, reply *CommonReply) {
@@ -64,6 +68,12 @@ func (rf *Raft) RequestHeartBeat(args *RequestHeartBeat, reply *CommonReply) {
 		rf.term = args.Term
 		DPrintf("[old leader switch to follower] me:%d leader:%d", rf.me, rf.leader)
 	}
+	/*if rf.term > args.Term {
+		return
+	}
+	rf.leader = args.Leader
+	rf.term = args.Term*/
+	// todo bugfix
 	rf.SetLastHeartBeat()
 	reply.OK = true
 	DPrintf("[heart beat ok] me%v leader%v term%v", rf.me, args.Leader, args.Term)

@@ -119,6 +119,7 @@ func TestManyElections2A(t *testing.T) {
 		// either the current leader should still be alive,
 		// or the remaining four should elect a new one.
 		cfg.checkOneLeader()
+		DPrintf("pass%d  ===>  leader still be alive or remaining four elect a new one", ii)
 
 		cfg.connect(i1)
 		cfg.connect(i2)
@@ -126,6 +127,7 @@ func TestManyElections2A(t *testing.T) {
 	}
 
 	cfg.checkOneLeader()
+	DPrintf("pass11  ===> have one leader")
 
 	cfg.end()
 }

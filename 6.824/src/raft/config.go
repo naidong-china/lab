@@ -438,6 +438,7 @@ func (cfg *config) checkOneLeader() int {
 		leaders := make(map[int][]int)
 		for i := 0; i < cfg.n; i++ {
 			if cfg.connected[i] {
+				DPrintf("check one leader  ===>  server:%d term:%d, leader:%d", cfg.rafts[i].me, cfg.rafts[i].term, cfg.rafts[i].leader)
 				if term, leader := cfg.rafts[i].GetState(); leader {
 					leaders[term] = append(leaders[term], i)
 				}
