@@ -58,23 +58,25 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 }
 
 func (rf *Raft) RequestHeartBeat(args *RequestHeartBeat, reply *CommonReply) {
-	if rf.term > args.Term && rf.leader != args.Leader {
-		rf.ChangeRole(Follower)
+	if rf.role == Leader && rf.term < args.Term {
+		rf.SwitchRole(Follower)
 		rf.leader = args.Leader
 		rf.term = args.Term
+		DPrintf("[old leader switch to follower] me:%d leader:%d", rf.me, rf.leader)
 	}
 	rf.SetLastHeartBeat()
 	reply.OK = true
-	return
+	DPrintf("[heart beat ok] me%v leader%v term%v", rf.me, args.Leader, args.Term)
 }
 
 func (rf *Raft) RequestNewLeader(args *RequestNewLeader, reply *CommonReply) {
-	rf.ChangeRole(Follower)
+	rf.SwitchRole(Follower)
 	rf.leader = args.Leader
 	rf.term = args.Term
 	rf.electionEnd = true
 	rf.SetLastHeartBeat()
 	reply.OK = true
+	DPrintf("[recv new leader] leader%d to server:%d", args.Leader, rf.me)
 }
 
 // example code to send a RequestVote RPC to a server.

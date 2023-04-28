@@ -94,7 +94,7 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) SetLastHeartBeat() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	rf.lastHeartBeat = (time.Now().UnixNano() / 1e6) + 3000
+	rf.lastHeartBeat = (time.Now().UnixNano() / 1e6) + 100
 }
 
 func (rf *Raft) GetLastHeartBeat() int64 {
@@ -103,20 +103,19 @@ func (rf *Raft) GetLastHeartBeat() int64 {
 	return rf.lastHeartBeat
 }
 
-func (rf *Raft) ChangeRole(toRole Role) {
+func (rf *Raft) SwitchRole(toRole Role) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	switch {
 	case rf.role == Candidate && toRole == Leader:
 		rf.leader = rf.me
 		rf.role = Leader
-		DPrintf("leader is server:%d in term:%d", rf.me, rf.term)
 	case rf.role == Follower && toRole == Candidate:
 		rf.leader = NoLeader
 		rf.term += 1
 		rf.role = Candidate
-		rf.hasVoted = true
-		rf.votes = 1
+		//rf.hasVoted = true
+		//rf.votes = 1
 	case rf.role == Candidate && toRole == Candidate:
 		rf.hasVoted = false
 		rf.votes = 0
@@ -249,11 +248,7 @@ func (rf *Raft) ticker() {
 				}
 				go func(server int) {
 					req := &RequestHeartBeat{rf.me, rf.term}
-					resp := &CommonReply{}
-					ok := rf.sendRequestHeartBeat(rf.leader, req, resp)
-					if ok && resp.OK {
-						//DPrintf("heart beat ok. leader%v, server%v", rf.leader, server)
-					}
+					rf.sendRequestHeartBeat(server, req, &CommonReply{})
 				}(i)
 			}
 			RandomizeSleep(rf.me, HeartBeatInterval)
@@ -274,16 +269,16 @@ func (rf *Raft) ticker() {
 		if rf.electionEnd {
 			continue
 		}
-		DPrintf("heartbeat loss, start election after %vms. leader%v, server%v, time:%v, now:%v", ms, rf.leader, rf.me, timeoutPoint, now)
+		DPrintf("[heartbeat loss, start election after %vms] leader%v, server%v", ms, rf.leader, rf.me)
 
 		// 心跳超时后, 转变为候选者, 开启新一轮投票
-		rf.ChangeRole(Candidate)
+		rf.SwitchRole(Candidate)
 
 		var wg sync.WaitGroup
 		for i := range rf.peers {
-			if i == rf.me {
+			/*if i == rf.me {
 				continue
-			}
+			}*/
 			wg.Add(1)
 			go func(server int) {
 				defer wg.Done()
@@ -295,15 +290,16 @@ func (rf *Raft) ticker() {
 					rf.mu.Unlock()
 					rf.votes += 1
 				}
-				DPrintf("request vote. me%d term%d server%d res:%v", rf.me, rf.term, server, rsp.Ok)
+				DPrintf("[request vote] me%d term%d server%d res:%v", rf.me, rf.term, server, rsp.Ok)
 			}(i)
 		}
 		wg.Wait()
 
 		majority := Majority(len(rf.peers))
-		DPrintf("vote result. server%d vote:%d majority:%d", rf.me, rf.votes, majority)
+		DPrintf("[vote result] server%d vote:%d majority:%d", rf.me, rf.votes, majority)
 		if rf.votes >= majority {
-			rf.ChangeRole(Leader)
+			rf.SwitchRole(Leader)
+			DPrintf("[new leader] is server:%d in term:%d", rf.me, rf.term)
 
 			for i := range rf.peers {
 				if i == rf.me {
@@ -313,9 +309,12 @@ func (rf *Raft) ticker() {
 					req := &RequestNewLeader{Leader: rf.me, Term: rf.term}
 					rsp := &CommonReply{}
 					ok := rf.sendRequestNewLeader(server, req, rsp)
-					DPrintf("notify new leader to server%d res:%v", server, ok)
+					DPrintf("[notify new leader] to server%d res:%v", server, ok)
 				}(i)
 			}
+		} else {
+			rf.hasVoted = false
+			rf.votes = 0
 		}
 
 		//RandomizeSleep(rf.me, 0)
